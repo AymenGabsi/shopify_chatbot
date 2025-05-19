@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shopify Chatbot</title>
+    <style>
+        #chatbox {
+            width: 300px;
+            height: 400px;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            border: 1px solid #ccc;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: Arial;
+        }
+        #chatbox input {
+            width: 80%;
+        }
+    </style>
+</head>
+<body>
+    <div id="chatbox">
+        <div id="chatHistory"></div>
+        <input id="userInput" type="text" placeholder="Ask about a product..." />
+        <button onclick="send()">Send</button>
+    </div>
+
+    <script>
+        async function send() {
+            const input = document.getElementById("userInput");
+            const message = input.value;
+            input.value = "";
+
+            document.getElementById("chatHistory").innerHTML += `<p><b>You:</b> ${message}</p>`;
+
+            const res = await fetch("/api/chat", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ message: message })
+            });
+
+            const data = await res.json();
+            document.getElementById("chatHistory").innerHTML += `<p><b>Bot:</b> ${data.reply}</p>`;
+        }
+    </script>
+</body>
+</html>
