@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 load_dotenv()
 
@@ -12,6 +13,102 @@ SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 SHOP = os.getenv("SHOPIFY_STORE_NAME")
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for external calls
+
+
+
+@app.route('/')
+def index():
+    return "Shopify AI Chatbot Backend is running."
+
+
+@app.route('/script.js')
+def serve_script_tag():
+    return """
+(function() {
+  if (window.__chatbot_injected) return;
+  window.__chatbot_injected = true;
+
+  const div = document.createElement("div");
+  div.innerHTML = `<style>
+    #chat-widget { position: fixed; bottom: 20px; right: 20px; width: 340px; height: 450px;
+      background: white; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+      font-family: 'Arial', sans-serif; z-index: 9999; display: flex; flex-direction: column; overflow: hidden; }
+    #chat-header { background: #111; color: white; padding: 12px; font-size: 16px; text-align: center; }
+    #chat-messages { flex: 1; padding: 10px; overflow-y: auto; font-size: 14px; }
+    #chat-input-area { display: flex; border-top: 1px solid #eee; }
+    #chat-input { flex: 1; border: none; padding: 10px; font-size: 14px; }
+    #chat-send { background: #111; color: white; border: none; padding: 10px 15px; cursor: pointer; }
+    .typing { font-style: italic; color: gray; }
+    .product-card { border: 1px solid #eee; border-radius: 8px; padding: 10px; margin: 5px 0; background: #f9f9f9; }
+    .product-card img { width: 100%; border-radius: 6px; }
+  </style>
+  <div id='chat-widget'>
+    <div id='chat-header'>🛍️ Chat with us</div>
+    <div id='chat-messages'></div>
+    <div id='chat-input-area'>
+      <input id='chat-input' placeholder='Ask me anything...' />
+      <button id='chat-send'>Send</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(div);
+
+  const input = document.getElementById('chat-input');
+  const messages = document.getElementById('chat-messages');
+  const sendBtn = document.getElementById('chat-send');
+  const BACKEND_URL = 'https://your-backend-url.onrender.com/api/chat';
+
+  function addMessage(sender, text, isHTML = false) {
+    const p = document.createElement('div');
+    p.innerHTML = `<strong>${sender}:</strong> ` + (isHTML ? text : escapeHtml(text));
+    messages.appendChild(p);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>"]'/g, m =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[m])
+    );
+  }
+
+  function showTyping() {
+    const typing = document.createElement('div');
+    typing.id = 'typing';
+    typing.className = 'typing';
+    typing.textContent = 'Bot is typing...';
+    messages.appendChild(typing);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function hideTyping() {
+    const typing = document.getElementById('typing');
+    if (typing) typing.remove();
+  }
+
+  sendBtn.onclick = async () => {
+    const msg = input.value.trim();
+    if (!msg) return;
+    addMessage('You', msg);
+    input.value = '';
+    showTyping();
+    try {
+      const res = await fetch(BACKEND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg })
+      });
+      const data = await res.json();
+      hideTyping();
+      addMessage('Bot', data.reply, true);
+    } catch (err) {
+      hideTyping();
+      addMessage('Bot', 'Sorry, something went wrong.');
+    }
+  };
+})();
+    """, 200, {'Content-Type': 'application/javascript'}
+
 
 
 def call_llama(messages):
