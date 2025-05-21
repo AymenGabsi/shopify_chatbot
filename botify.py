@@ -10,7 +10,7 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
-SHOP = os.getenv("SHOPIFY_STORE_NAME")
+SHOP = "gabsistore.myshopify.com"
 META_TOKEN = os.getenv("META_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -107,17 +107,24 @@ def get_product_details(product_name):
 def extract_requested_info(product, info_type):
     if not product['variants']:
         return "No variant data available."
-    variant = product['variants'][0]
-    if info_type == "price":
-        return f"The price of {product['title']} is ${variant['price']}"
-    elif info_type == "stock":
-        return f"{variant['inventory_quantity']} units in stock."
-    elif info_type == "color":
-        return f"Available colors: {', '.join([v['option1'] for v in product['variants']])}."
-    elif info_type == "size":
-        return f"Sizes: {', '.join(set([v['option2'] for v in product['variants'] if v['option2']]))}."
-    else:
-        return "I couldn’t find that information."
+
+    title = product.get('title', 'N/A')
+    description = product.get('body_html', 'N/A')
+    prices = set(v['price'] for v in product['variants'])
+    colors = set(v['option1'] for v in product['variants'] if 'option1' in v)
+    sizes = set(v['option2'] for v in product['variants'] if 'option2' in v and v['option2'])
+    total_inventory = sum(v.get('inventory_quantity', 0) for v in product['variants'])
+
+    info_block = f"""
+- Title: {title}
+- Description: {description}
+- Price(s): {', '.join(f'${p}' for p in prices)}
+- Available colors: {', '.join(colors) if colors else 'N/A'}
+- Sizes: {', '.join(sizes) if sizes else 'N/A'}
+- Total stock: {total_inventory} units
+"""
+
+    return info_block
 
 
 def get_order_info(order_id=None, email=None):
@@ -134,8 +141,15 @@ def get_order_info(order_id=None, email=None):
 
 def generate_llama_response(user_message, extracted_info):
     messages = [
-        {"role": "system", "content": "You are a friendly AI assistant for a Shopify store."},
-        {"role": "user", "content": f"Customer question: {user_message}\n\nData: {extracted_info}"}
+        {"role": "system", "content": "You are a Shopify product assistant. ONLY use the information provided below. Do not guess. If the answer is not present in the product data, say 'I couldn't find that information.'"},
+        {"role": "user", "content": f"""
+PRODUCT DATA:
+{extracted_info}
+
+CUSTOMER QUESTION:
+{user_message}
+
+ANSWER:"""}
     ]
     return call_llama(messages)
 
