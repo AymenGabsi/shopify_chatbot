@@ -5,6 +5,8 @@ import requests
 import os
 from dotenv import load_dotenv
 from flask_cors import CORS
+from models import Session, Message
+from datetime import datetime
 
 load_dotenv()
 
@@ -20,14 +22,14 @@ CORS(app)
 
 @app.route('/')
 def index():
-    return "Shopify WhatsApp AI Chatbot is running."
+    return "Shopify WhatsApp AI Chatbot with Supabase is running."
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
         if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
-        return "Verification token mismatch", 403
+        return "Token de vérification invalide", 403
 
     if request.method == 'POST':
         data = request.json
@@ -37,7 +39,7 @@ def webhook():
             phone_number = message['from']
             text = message['text']['body']
 
-            reply = handle_message(text)
+            reply = handle_message(text, phone_number)
             send_whatsapp_message(phone_number, reply)
 
         return 'OK', 200
@@ -55,6 +57,21 @@ def send_whatsapp_message(phone, text):
         "text": {"body": text}
     }
     requests.post(url, headers=headers, json=payload)
+
+
+def save_to_supabase(user_id, role, message):
+    session = Session()
+    msg = Message(user_id=user_id, role=role, message=message)
+    session.add(msg)
+    session.commit()
+    session.close()
+
+
+def get_conversation_history(user_id, limit=10):
+    session = Session()
+    msgs = session.query(Message).filter_by(user_id=user_id).order_by(Message.timestamp.desc()).limit(limit).all()
+    session.close()
+    return [{"role": m.role, "content": m.message} for m in reversed(msgs)]
 
 
 def call_llama(messages):
@@ -139,51 +156,46 @@ def get_order_info(order_id=None, email=None):
     return orders[0] if orders else None
 
 
-def generate_llama_response(user_message, extracted_info):
-    messages = [
-        {"role": "system", "content": "You are a Shopify product assistant. ONLY use the information provided below. Do not guess. If the answer is not present in the product data, say 'I couldn't find that information.'"},
-        {"role": "user", "content": f"""
-PRODUCT DATA:
-{extracted_info}
-
-CUSTOMER QUESTION:
-{user_message}
-
-ANSWER:"""}
-    ]
+def generate_llama_response_with_history(user_id, extracted_info=None, new_user_input=None):
+    messages = [{"role": "system", "content": "You are a helpful Shopify assistant. Use only the information provided. Do not guess."}]
+    if extracted_info:
+        messages.append({"role": "system", "content": f"Product context:\n{extracted_info}"})
+    messages += get_conversation_history(user_id)
+    if new_user_input:
+        messages.append({"role": "user", "content": new_user_input})
     return call_llama(messages)
 
 
-def generate_generic_response(user_message):
-    return call_llama([
-        {"role": "system", "content": "You are a helpful assistant for a fashion store."},
-        {"role": "user", "content": user_message}
-    ])
-
-
-def handle_message(user_text):
+def handle_message(user_text, phone_number):
+    save_to_supabase(phone_number, "user", user_text)
     analysis = classify_intent_and_entities(user_text)
     intent = analysis["intent"]
+    reply_text = "Je n'ai pas bien compris votre demande."
 
     if intent == "product_info" and analysis["product_name"]:
         product = get_product_details(analysis["product_name"])
         if product:
             info = extract_requested_info(product, analysis.get("info", "price"))
-            return generate_llama_response(user_text, info)
+            reply_text = generate_llama_response_with_history(phone_number, info, user_text)
 
     elif intent == "order_status" and (analysis["order_id"] or analysis["email"]):
         order = get_order_info(order_id=analysis["order_id"], email=analysis["email"])
         if order:
-            return generate_llama_response(user_text, f"Order status: {order['fulfillment_status']}")
+            reply_text = generate_llama_response_with_history(phone_number, f"Order status: {order['fulfillment_status']}", user_text)
 
     elif intent == "delivery_policy":
-        return "We deliver worldwide within 3–5 business days. Shipping is free on orders over $50."
+        reply_text = "La livraison prend entre 3 et 5 jours ouvrés."
 
     elif intent == "return_policy":
-        return "Returns are accepted within 30 days. Items must be unused and in original packaging."
+        reply_text = "Les retours sont acceptés sous 30 jours. Les articles doivent être non utilisés et dans leur emballage d'origine."
 
-    return generate_generic_response(user_text)
+    else:
+        reply_text = generate_llama_response_with_history(phone_number, None, user_text)
+
+    save_to_supabase(phone_number, "assistant", reply_text)
+    return reply_text
 
 
 if __name__ == '__main__':
     app.run(debug=True)
+
