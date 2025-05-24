@@ -196,6 +196,16 @@ def handle_message(user_text, phone_number):
     save_to_supabase(phone_number, "assistant", reply_text)
     return reply_text
 
+@app.route('/health')
+def health():
+    try:
+        session = Session()
+        session.execute('SELECT 1')
+        session.close()
+        return '✅ Database connected'
+    except Exception as e:
+        return f'❌ DB error: {e}', 500
+
 
 if __name__ == '__main__':
     app.run(debug=True)
