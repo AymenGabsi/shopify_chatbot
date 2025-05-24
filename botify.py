@@ -201,11 +201,18 @@ def handle_message(user_text, phone_number):
 def health():
     try:
         session = Session()
-        session.execute(text('SELECT 1')) 
+        session.execute(text('SELECT 1'))
         session.close()
         return '✅ Database connected'
     except Exception as e:
         return f'❌ DB error: {e}', 500
+
+
+@app.route("/init-db")
+def init_db():
+    from models import Base, engine
+    Base.metadata.create_all(engine)
+    return "✅ DB created"
 
 
 if __name__ == '__main__':
