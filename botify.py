@@ -1,6 +1,6 @@
-# Shopify WhatsApp AI Chatbot - Flask App (Deployable)
+# botify.py — Shopify WhatsApp Chatbot with Render PostgreSQL + Contextual LLaMA
 
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import requests
 import os
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
-SHOP = "gabsistore.myshopify.com"
+SHOP = os.getenv("SHOPIFY_STORE_NAME")
 META_TOKEN = os.getenv("META_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -23,7 +23,17 @@ CORS(app)
 
 @app.route('/')
 def index():
-    return "Shopify WhatsApp AI Chatbot with Supabase is running."
+    return "🟢 Botify WhatsApp Chatbot Running"
+
+@app.route('/health')
+def health():
+    try:
+        session = Session()
+        session.execute(text("SELECT 1"))
+        session.close()
+        return "✅ Database connected"
+    except Exception as e:
+        return f"❌ DB error: {e}", 500
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -34,7 +44,6 @@ def webhook():
 
     if request.method == 'POST':
         data = request.json
-        print("📩 Incoming WhatsApp webhook:", data)
         entry = data['entry'][0]['changes'][0]['value']
         if 'messages' in entry:
             message = entry['messages'][0]
@@ -48,7 +57,7 @@ def webhook():
 
 
 def send_whatsapp_message(phone, text):
-    url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {META_TOKEN}",
         "Content-Type": "application/json"
@@ -58,7 +67,8 @@ def send_whatsapp_message(phone, text):
         "to": phone,
         "text": {"body": text}
     }
-    requests.post(url, headers=headers, json=payload)
+    res = requests.post(url, headers=headers, json=payload)
+    print("📤 WhatsApp API response:", res.status_code, res.text)
 
 
 def save_to_supabase(user_id, role, message):
@@ -142,7 +152,6 @@ def extract_requested_info(product, info_type):
 - Sizes: {', '.join(sizes) if sizes else 'N/A'}
 - Total stock: {total_inventory} units
 """
-
     return info_block
 
 
@@ -159,12 +168,25 @@ def get_order_info(order_id=None, email=None):
 
 
 def generate_llama_response_with_history(user_id, extracted_info=None, new_user_input=None):
-    messages = [{"role": "system", "content": "You are a helpful Shopify assistant. Use only the information provided. Do not guess."}]
+    messages = [
+        {"role": "system", "content": (
+            "You are a product assistant for a Shopify store.\n"
+            "Only respond using the information provided in the product context or conversation history.\n"
+            "Do NOT say you don’t have the data unless the context is completely missing.\n"
+            "Do NOT refer the user elsewhere.\n"
+            "Be concise and accurate."
+        )}
+    ]
+
     if extracted_info:
-        messages.append({"role": "system", "content": f"Product context:\n{extracted_info}"})
+        messages.append({"role": "system", "content": f"PRODUCT CONTEXT:\n{extracted_info.strip()}"})
+
     messages += get_conversation_history(user_id)
+
     if new_user_input:
-        messages.append({"role": "user", "content": new_user_input})
+        messages.append({"role": "user", "content": new_user_input.strip()})
+
+    print("🧠 Prompt to LLaMA:", messages)
     return call_llama(messages)
 
 
@@ -179,11 +201,15 @@ def handle_message(user_text, phone_number):
         if product:
             info = extract_requested_info(product, analysis.get("info", "price"))
             reply_text = generate_llama_response_with_history(phone_number, info, user_text)
+        else:
+            reply_text = "Je suis désolé, je n’ai pas trouvé ce produit dans notre boutique."
 
     elif intent == "order_status" and (analysis["order_id"] or analysis["email"]):
         order = get_order_info(order_id=analysis["order_id"], email=analysis["email"])
         if order:
             reply_text = generate_llama_response_with_history(phone_number, f"Order status: {order['fulfillment_status']}", user_text)
+        else:
+            reply_text = "Je n’ai pas trouvé de commande associée."
 
     elif intent == "delivery_policy":
         reply_text = "La livraison prend entre 3 et 5 jours ouvrés."
@@ -197,24 +223,6 @@ def handle_message(user_text, phone_number):
     save_to_supabase(phone_number, "assistant", reply_text)
     return reply_text
 
-@app.route('/health')
-def health():
-    try:
-        session = Session()
-        session.execute(text('SELECT 1'))
-        session.close()
-        return '✅ Database connected'
-    except Exception as e:
-        return f'❌ DB error: {e}', 500
-
-
-@app.route("/init-db")
-def init_db():
-    from models import Base, engine
-    Base.metadata.create_all(engine)
-    return "✅ DB created"
-
 
 if __name__ == '__main__':
     app.run(debug=True)
-
