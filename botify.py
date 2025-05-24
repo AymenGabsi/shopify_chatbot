@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from flask_cors import CORS
 from models import Session, Message
 from datetime import datetime
+from sqlalchemy import text
 
 load_dotenv()
 
@@ -200,7 +201,7 @@ def handle_message(user_text, phone_number):
 def health():
     try:
         session = Session()
-        session.execute('SELECT 1')
+        session.execute(text('SELECT 1')) 
         session.close()
         return '✅ Database connected'
     except Exception as e:
