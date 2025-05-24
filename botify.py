@@ -33,6 +33,7 @@ def webhook():
 
     if request.method == 'POST':
         data = request.json
+        print("📩 Incoming WhatsApp webhook:", data)
         entry = data['entry'][0]['changes'][0]['value']
         if 'messages' in entry:
             message = entry['messages'][0]
@@ -46,7 +47,7 @@ def webhook():
 
 
 def send_whatsapp_message(phone, text):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {META_TOKEN}",
         "Content-Type": "application/json"
