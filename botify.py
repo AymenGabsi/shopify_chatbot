@@ -161,8 +161,7 @@ def extract_requested_info(product, info_type):
 📦 *Stock:* {stock} en stock"""
 
     # Complex product with variants
-    option_info = "
-".join([f"- Option {i+1}: {name}" for i, name in enumerate(option_names)])
+    option_info = "\n".join([f"- Option {i+1}: {name}" for i, name in enumerate(option_names)])
     variant_details = []
     for v in variants:
         option_values = [v.get(f"option{i+1}", '') for i in range(len(option_names))]
