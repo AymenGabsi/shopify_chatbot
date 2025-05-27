@@ -1,4 +1,4 @@
-# botify.py — Shopify WhatsApp Chatbot with Render PostgreSQL + Contextual LLaMA
+# botify.py — Shopify WhatsApp Chatbot with Variants, Multilingual Replies, PostgreSQL + LLaMA
 
 from flask import Flask, request
 import requests
@@ -8,12 +8,13 @@ from flask_cors import CORS
 from models import Session, Message
 from datetime import datetime
 from sqlalchemy import text
+from langdetect import detect
 
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
-SHOP = os.getenv("SHOPIFY_STORE_NAME")
+SHOP = "gabsistore.myshopify.com"
 META_TOKEN = os.getenv("META_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -98,6 +99,13 @@ def call_llama(messages):
     return response.json()["choices"][0]["message"]["content"]
 
 
+def detect_language(text):
+    try:
+        return detect(text)
+    except:
+        return 'en'
+
+
 def classify_intent_and_entities(user_message):
     prompt = f"""
 Given this customer message, identify the intent and extract any relevant entities.
@@ -107,7 +115,7 @@ intent: one of [product_info, order_status, delivery_policy, return_policy, gene
 product_name: <if applicable>
 order_id: <if applicable>
 email: <if applicable>
-info: <if applicable>
+info: one of [price, variants, stock, stock_by_variant, color, size]
 
 Message: "{user_message}"
 """
@@ -134,25 +142,39 @@ def get_product_details(product_name):
 
 
 def extract_requested_info(product, info_type):
-    if not product['variants']:
-        return "No variant data available."
-
+    variants = product.get('variants', [])
     title = product.get('title', 'N/A')
     description = product.get('body_html', 'N/A')
-    prices = set(v['price'] for v in product['variants'])
-    colors = set(v['option1'] for v in product['variants'] if 'option1' in v)
-    sizes = set(v['option2'] for v in product['variants'] if 'option2' in v and v['option2'])
-    total_inventory = sum(v.get('inventory_quantity', 0) for v in product['variants'])
+    option_names = product.get('options', [])
 
-    info_block = f"""
-- Title: {title}
-- Description: {description}
-- Price(s): {', '.join(f'${p}' for p in prices)}
-- Available colors: {', '.join(colors) if colors else 'N/A'}
-- Sizes: {', '.join(sizes) if sizes else 'N/A'}
-- Total stock: {total_inventory} units
-"""
-    return info_block
+    if not variants:
+        return "Aucune information de stock disponible."
+
+    if len(variants) == 1 and (not option_names or all(o['name'] == 'Title' for o in option_names)):
+        # Simple product
+        v = variants[0]
+        price = v.get('price', 'N/A')
+        stock = v.get('inventory_quantity', 0)
+        return f"""📦 *Produit:* {title}
+🧾 *Description:* {description.strip()}
+💰 *Prix:* ${price}
+📦 *Stock:* {stock} en stock"""
+
+    # Complex product with multiple variant options
+    variant_details = []
+    for v in variants:
+        option_values = [v.get(f"option{i+1}", '') for i in range(len(option_names))]
+        combination = " / ".join([val for val in option_values if val])
+        price = v.get('price', 'N/A')
+        stock = v.get('inventory_quantity', 0)
+        line = f"- {combination} — ${price} — {stock} en stock"
+        variant_details.append(line)
+
+    info_block = f"""📦 *Produit:* {title}
+🧾 *Description:* {description.strip()}
+🔢 *Détails des variantes:* 
+{chr(10).join(variant_details)}"""
+    return info_block.strip()
 
 
 def get_order_info(order_id=None, email=None):
@@ -168,15 +190,21 @@ def get_order_info(order_id=None, email=None):
 
 
 def generate_llama_response_with_history(user_id, extracted_info=None, new_user_input=None):
-    messages = [
-        {"role": "system", "content": (
-            "You are a product assistant for a Shopify store.\n"
-            "Only respond using the information provided in the product context or conversation history.\n"
-            "Do NOT say you don’t have the data unless the context is completely missing.\n"
-            "Do NOT refer the user elsewhere.\n"
-            "Be concise and accurate."
-        )}
-    ]
+    lang = detect_language(new_user_input or '')
+
+    if lang == 'fr':
+        sys_instruction = (
+            "Tu es un assistant pour une boutique Shopify. "
+            "Utilise uniquement les informations fournies. "
+            "Ne devine pas. Réponds toujours en français."
+        )
+    else:
+        sys_instruction = (
+            "You are a Shopify assistant. "
+            "Use only the provided context. Do not guess. Reply in English."
+        )
+
+    messages = [{"role": "system", "content": sys_instruction}]
 
     if extracted_info:
         messages.append({"role": "system", "content": f"PRODUCT CONTEXT:\n{extracted_info.strip()}"})
