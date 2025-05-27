@@ -167,7 +167,7 @@ def extract_requested_info(product, info_type):
         combination = " / ".join([val for val in option_values if val])
         price = v.get('price', 'N/A')
         stock = v.get('inventory_quantity', 0)
-        line = f"- {combination} — ${price} — {stock} en stock"
+        line = f"- Variant: {combination} | Price: ${price} | Stock: {stock}"
         variant_details.append(line)
 
     info_block = f"""📦 *Produit:* {title}
@@ -196,18 +196,27 @@ def generate_llama_response_with_history(user_id, extracted_info=None, new_user_
         sys_instruction = (
             "Tu es un assistant pour une boutique Shopify. "
             "Utilise uniquement les informations fournies. "
-            "Ne devine pas. Réponds toujours en français."
+            "Si une variante est demandée (comme la couleur ou la taille), cherche cette information dans les données du produit. "
+            "Ne devine pas et ne dis pas que l'information manque si elle est présente. Réponds en français."
         )
     else:
         sys_instruction = (
             "You are a Shopify assistant. "
-            "Use only the provided context. Do not guess. Reply in English."
+            "Only use the product data provided. "
+            "If the user asks about a variant (like color or size), look for it in the context. "
+            "Do NOT say you can't find it if it's there. Respond in English."
         )
 
     messages = [{"role": "system", "content": sys_instruction}]
 
     if extracted_info:
-        messages.append({"role": "system", "content": f"PRODUCT CONTEXT:\n{extracted_info.strip()}"})
+        messages.append({
+            "role": "system",
+            "content": f"""PRODUCT DATA:
+{extracted_info.strip()}
+
+Instruction: Answer the customer's question based on the above data only. If a specific variant attribute (e.g., color) is asked, extract it from the variants listed."""
+        })
 
     messages += get_conversation_history(user_id)
 
