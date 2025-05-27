@@ -145,12 +145,12 @@ def extract_requested_info(product, info_type):
     variants = product.get('variants', [])
     title = product.get('title', 'N/A')
     description = product.get('body_html', 'N/A')
-    option_names = product.get('options', [])
+    option_names = [o['name'] for o in product.get('options', []) if o['name'].lower() != 'title']
 
     if not variants:
         return "Aucune information de stock disponible."
 
-    if len(variants) == 1 and (not option_names or all(o['name'] == 'Title' for o in option_names)):
+    if len(variants) == 1 and not option_names:
         # Simple product
         v = variants[0]
         price = v.get('price', 'N/A')
@@ -160,19 +160,23 @@ def extract_requested_info(product, info_type):
 💰 *Prix:* ${price}
 📦 *Stock:* {stock} en stock"""
 
-    # Complex product with multiple variant options
+    # Complex product with variants
+    option_info = "
+".join([f"- Option {i+1}: {name}" for i, name in enumerate(option_names)])
     variant_details = []
     for v in variants:
         option_values = [v.get(f"option{i+1}", '') for i in range(len(option_names))]
-        combination = " / ".join([val for val in option_values if val])
+        details = [f"{option_names[i]}: {option_values[i]}" for i in range(len(option_values)) if option_values[i]]
         price = v.get('price', 'N/A')
         stock = v.get('inventory_quantity', 0)
-        line = f"- Variant: {combination} | Price: ${price} | Stock: {stock}"
+        line = f"- {' | '.join(details)} | Price: ${price} | Stock: {stock}"
         variant_details.append(line)
 
     info_block = f"""📦 *Produit:* {title}
 🧾 *Description:* {description.strip()}
-🔢 *Détails des variantes:* 
+🧩 *Variant Attributes:*
+{option_info}
+🔢 *Variant Details:*
 {chr(10).join(variant_details)}"""
     return info_block.strip()
 
@@ -215,7 +219,7 @@ def generate_llama_response_with_history(user_id, extracted_info=None, new_user_
             "content": f"""PRODUCT DATA:
 {extracted_info.strip()}
 
-Instruction: Answer the customer's question based on the above data only. If a specific variant attribute (e.g., color) is asked, extract it from the variants listed."""
+Instruction: Answer the customer's question using the above product data. If a specific attribute like color, size, or material is asked about, extract it from the variant combinations listed. If it is present, you must answer with that information. Do NOT say the data is missing if it's provided."""
         })
 
     messages += get_conversation_history(user_id)
